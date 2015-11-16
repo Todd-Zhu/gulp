@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>TODO supply a title</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width">
+    </head>
+    <body>
+        <h2>写在前面</h2>
+        <p>本来是想写个如何编写gulp插件的科普文的，突然探究欲又发作了，于是就有了这篇东西。。。翻了下源码看了下<code>gulp.src()</code>的实现，不禁由衷感慨：肿么这么复杂。。。</p>
+        <h2>进入正题</h2>
+        <p>首先我们看下<code>gulpfile</code>里面的内容是长什么样子的，很有express中间件的味道是不是～<br />我们知道<code>.pipe()</code>是典型的流式操作的API。很自然的，我们会想到<code>gulp.src()</code>这个API返回的应该是个Stream对象（也许经过层层封装）。本着一探究竟的目的，花了点时间把gulp的源码大致扫了下，终于找到了答案。</p>
+        <p>gulpfile.js</p>
+        <pre class="hljs-dark"><code class="hljs javascript"><span class="hljs-keyword">var gulp = <span class="hljs-built_in">require(<span class="hljs-string">'gulp'),
+    preprocess = <span class="hljs-built_in">require(<span class="hljs-string">'gulp-preprocess');
+ 
+gulp.task(<span class="hljs-string">'default', <span class="hljs-function"><span class="hljs-keyword">function<span class="hljs-params">() {
+ 
+    gulp.src(<span class="hljs-string">'src/index.html')
+        .pipe(preprocess({USERNAME:<span class="hljs-string">'程序猿小卡'}))
+        .pipe(gulp.dest(<span class="hljs-string">'dest/'));
+});
+</span></span></span></span></span></span></span></span></span></span></span></span></code></pre>
+        <h2>提前剧透</h2>
+        <p>此处有内容剧透，如有对剧透不适者，请自行跳过本段落。。。</p>
+        <blockquote>
+            <p>gulp.src() 的确返回了定制化的Stream对象。可以在github上搜索<code>ordered-read-streams</code>这个项目。</p>
+            <p>大致关系是：<br />ordered-read-streams --> glob-stream --> vinyl-fs --> gulp.src()</p>
+ 
+ 
+        </blockquote>
+        <h2>探究之路</h2>
+        <p>首先，我们看下<code>require('gulp')</code>返回了什么。从gulp的源码来看，返回了<code>Gulp</code>对象，该对象上有<code>src</code>、<code>pipe</code>、<code>dest</code>等方法。很好，找到了我们想要的<code>src</code>方法。接着往下看<br />参考：<a href="https://github.com/gulpjs/gulp/blob/master/index.js#L62" target="_blank">https://github.com/gulpjs/gulp/blob/master/index.js#L62</a></p>
+        <p>gulp/index.js</p>
+        <pre class="hljs-dark"><code class="hljs js"><span class="hljs-keyword">var inst = <span class="hljs-keyword">new Gulp();
+<span class="hljs-built_in">module.exports = inst;
+</span></span></span></code></pre>
+        <p>从下面的代码可以看到，<code>gulp.src</code>方法，实际上是<code>vfs.src</code>。继续<br />参考：<a href="https://github.com/gulpjs/gulp/blob/master/index.js#L25" target="_blank">https://github.com/gulpjs/gulp/blob/master/index.js#L25</a></p>
+        <p>gulp/index.js</p>
+        <pre class="hljs-dark"><code class="hljs js"><span class="hljs-keyword">var vfs = <span class="hljs-built_in">require(<span class="hljs-string">'vinyl-fs');
+<span class="hljs-comment">// 省略很多行代码
+Gulp.prototype.src = vfs.src;
+</span></span></span></span></code></pre>
+        <p>接下来我们看下<code>vfs.src</code>这个方法。从<code>vinyl-fs/index.js</code>可以看到，<code>vfs.src</code>实际是<code>vinyl-fs/lib/src/index.js</code>。<br />参考：<a href="https://github.com/wearefractal/vinyl-fs/blob/master/index.js" target="_blank">https://github.com/wearefractal/vinyl-fs/blob/master/index.js</a></p>
+        <p>vinyl-fs/index.js</p>
+        <pre class="hljs-dark"><code class="hljs js"><span class="hljs-pi">'use strict';
+ 
+<span class="hljs-built_in">module.exports = {
+  src: <span class="hljs-built_in">require(<span class="hljs-string">'./lib/src'),
+  dest: <span class="hljs-built_in">require(<span class="hljs-string">'./lib/dest'),
+  watch: <span class="hljs-built_in">require(<span class="hljs-string">'glob-watcher')
+};
+</span></span></span></span></span></span></span></span></code></pre>
+        <p>那么，我们看下<code>vinyl-fs/lib/src/index.js</code>。可以看到，<code>gulp.src()</code>返回的，实际是<code>outputStream</code>这货，而<code>outputStream</code>是<code>gs.create(glob, options).pipe()</code>获得的，差不多接近真相了，还有几步而已。<br />参考：<a href="https://github.com/wearefractal/vinyl-fs/blob/master/lib/src/index.js#L37" target="_blank">https://github.com/wearefractal/vinyl-fs/blob/master/lib/src/index.js#L37</a></p>
+        <p>vinyl-fs/lib/src/index.js</p>
+        <pre class="hljs-dark"><code class="hljs js"><span class="hljs-keyword">var defaults = <span class="hljs-built_in">require(<span class="hljs-string">'lodash.defaults');
+<span class="hljs-keyword">var through = <span class="hljs-built_in">require(<span class="hljs-string">'through2');
+<span class="hljs-keyword">var gs = <span class="hljs-built_in">require(<span class="hljs-string">'glob-stream');
+<span class="hljs-keyword">var File = <span class="hljs-built_in">require(<span class="hljs-string">'vinyl');
+ 
+<span class="hljs-comment">// 省略非重要代码若干行
+ 
+<span class="hljs-function"><span class="hljs-keyword">function <span class="hljs-title">src<span class="hljs-params">(glob, opt) {
+  <span class="hljs-comment">// 继续省略代码
+ 
+  <span class="hljs-keyword">var globStream = gs.create(glob, options);
+ 
+  <span class="hljs-comment">// when people write to use just pass it through
+  <span class="hljs-keyword">var outputStream = globStream
+    .pipe(through.obj(createFile))
+    .pipe(getStats(options));
+ 
+  <span class="hljs-keyword">if (options.read !== <span class="hljs-literal">false) {
+    outputStream = outputStream
+      .pipe(getContents(options));
+  }
+  <span class="hljs-comment">// 就是这里了
+  <span class="hljs-keyword">return outputStream
+    .pipe(through.obj());
+}
+</span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></code></pre>
+        <p>我们再看看<code>glob-stream/index.js</code>里的<code>create</code>方法，最后的<code>return aggregate.pipe(uniqueStream);</code>。好的，下一步就是真相了，我们去<code>ordered-read-streams</code>这个项目一探究竟。<br />参考：<a href="https://github.com/wearefractal/glob-stream/blob/master/index.js#L89" target="_blank">https://github.com/wearefractal/glob-stream/blob/master/index.js#L89</a></p>
+        <p>glob-stream/index.js</p>
+        <pre class="hljs-dark"><code class="hljs js"><span class="hljs-keyword">var through2 = <span class="hljs-built_in">require(<span class="hljs-string">'through2');
+<span class="hljs-keyword">var Combine = <span class="hljs-built_in">require(<span class="hljs-string">'ordered-read-streams');
+<span class="hljs-keyword">var unique = <span class="hljs-built_in">require(<span class="hljs-string">'unique-stream');
+ 
+<span class="hljs-keyword">var glob = <span class="hljs-built_in">require(<span class="hljs-string">'glob');
+<span class="hljs-keyword">var minimatch = <span class="hljs-built_in">require(<span class="hljs-string">'minimatch');
+<span class="hljs-keyword">var glob2base = <span class="hljs-built_in">require(<span class="hljs-string">'glob2base');
+<span class="hljs-keyword">var path = <span class="hljs-built_in">require(<span class="hljs-string">'path');
+ 
+<span class="hljs-comment">// 必须省略很多代码
+ 
+<span class="hljs-comment">// create 方法
+create: <span class="hljs-function"><span class="hljs-keyword">function<span class="hljs-params">(globs, opt) {
+    <span class="hljs-comment">// 继续省略代码
+<span class="hljs-comment">// create all individual streams
+    <span class="hljs-keyword">var streams = positives.map(<span class="hljs-function"><span class="hljs-keyword">function<span class="hljs-params">(glob){
+      <span class="hljs-keyword">return gs.createStream(glob, negatives, opt);
+    });
+ 
+    <span class="hljs-comment">// then just pipe them to a single unique stream and return it
+    <span class="hljs-keyword">var aggregate = <span class="hljs-keyword">new Combine(streams);
+    <span class="hljs-keyword">var uniqueStream = unique(<span class="hljs-string">'path');
+ 
+    <span class="hljs-comment">// TODO: set up streaming queue so items come in order
+ 
+    <span class="hljs-keyword">return aggregate.pipe(uniqueStream);
+</span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></code></pre>
+        <p>真相来了，我们看下<code>ordered-read-streams</code>的代码，可能刚开始看不是很懂，没关系，知道它实现了自己的<code>Stream</code>就可以了（nodejs是有暴露相应的API让开发者对Stream进行定制的），具体可参考：<a href="http://www.nodejs.org/api/stream.html#stream_api_for_stream_implementors" target="_blank">http://www.nodejs.org/api/stream.html#stream_api_for_stream_implementors</a></p>
+        <p>代码来自：<a href="https://github.com/armed/ordered-read-streams/blob/master/index.js" target="_blank">https://github.com/armed/ordered-read-streams/blob/master/index.js</a></p>
+        <p>ordered-read-streams/index.js</p>
+        <pre class="hljs-dark"><code class="hljs js"><span class="hljs-function"><span class="hljs-keyword">function <span class="hljs-title">OrderedStreams<span class="hljs-params">(streams, options) {
+  <span class="hljs-keyword">if (!(<span class="hljs-keyword">this <span class="hljs-keyword">instanceof(OrderedStreams))) {
+    <span class="hljs-keyword">return <span class="hljs-keyword">new OrderedStreams(streams, options);
+  }
+ 
+  streams = streams || [];
+  options = options || {};
+ 
+  <span class="hljs-keyword">if (!<span class="hljs-built_in">Array.isArray(streams)) {
+    streams = [streams];
+  }
+ 
+  options.objectMode = <span class="hljs-literal">true;
+ 
+  Readable.call(<span class="hljs-keyword">this, options);
+ 
+  <span class="hljs-comment">// stream data buffer
+  <span class="hljs-keyword">this._buffs = [];
+ 
+  <span class="hljs-keyword">if (streams.length === <span class="hljs-number">0) {
+    <span class="hljs-keyword">this.push(<span class="hljs-literal">null); <span class="hljs-comment">// no streams, close
+    <span class="hljs-keyword">return;
+  }  
+ 
+  streams.forEach(<span class="hljs-function"><span class="hljs-keyword">function <span class="hljs-params">(s, i) {
+    <span class="hljs-keyword">if (!s.readable) {
+      <span class="hljs-keyword">throw <span class="hljs-keyword">new <span class="hljs-built_in">Error(<span class="hljs-string">'All input streams must be readable');
+    }
+    s.on(<span class="hljs-string">'error', <span class="hljs-function"><span class="hljs-keyword">function <span class="hljs-params">(e) {
+      <span class="hljs-keyword">this.emit(<span class="hljs-string">'error', e);
+    }.bind(<span class="hljs-keyword">this));
+ 
+    <span class="hljs-keyword">var buff = [];
+    <span class="hljs-keyword">this._buffs.push(buff);
+ 
+    s.on(<span class="hljs-string">'data', buff.unshift.bind(buff));
+    s.on(<span class="hljs-string">'end', flushStreamAtIndex.bind(<span class="hljs-keyword">this, i));
+  }, <span class="hljs-keyword">this);
+}
+</span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></span></code></pre>
+        <p>参考：<a href="https://github.com/armed/ordered-read-streams/blob/master/index.js" target="_blank">https://github.com/armed/ordered-read-streams/blob/master/index.js</a></p>
+        <h2>写在后面</h2>
+        <p>兜兜转转一大圈，终于找到了<code>gulp.src()</code>的源头，大致流程如下，算是蛮深的层级。代码细节神马的，有兴趣的同学可以深究一下。</p>
+        <blockquote>
+            <p>ordered-read-streams --> glob-stream --> vinyl-fs --> gulp.src()</p>
+            <p>test1</p>
+        </blockquote>
+    </body>
+</html>
