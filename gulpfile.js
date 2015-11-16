@@ -13,11 +13,7 @@ var gulp    = require('gulp'),                 //基础库
     uglify  = require('gulp-uglify'),          //js压缩
     rename = require('gulp-rename'),           //重命名
     concat  = require('gulp-concat'),          //合并文件
-    clean = require('gulp-clean'),             //清空文件夹
-    tinylr = require('tiny-lr'),               //livereload
-    server = tinylr(),
-    port = 8001,
-    livereload = require('gulp-livereload');   //livereload
+    clean = require('gulp-clean');             //清空文件夹
 
 // HTML处理
 gulp.task('html', function() {
